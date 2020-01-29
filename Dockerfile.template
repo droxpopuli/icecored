@@ -1,0 +1,47 @@
+# Install toolchain.
+FROM balenalib/%%BALENA_MACHINE_NAME%%-python:3.7.4-stretch-build AS build
+RUN install_packages clang bison flex gawk tcl-dev graphviz xdot pkg-config python libftdi-dev libusb-1.0-0-dev
+
+# Synthesis
+RUN git clone --single-branch https://github.com/cliffordwolf/icestorm.git icestorm
+RUN git clone --single-branch https://github.com/cseed/arachne-pnr.git arachne-pnr
+RUN git clone --branch yosys-0.9 --single-branch https://github.com/cliffordwolf/yosys.git yosys
+RUN cd icestorm \
+ && make -j$(nproc) PREFIX=/opt\
+ && sudo make install PREFIX=/opt \
+ && cd ..
+RUN cd arachne-pnr \
+ && make -j$(nproc) PREFIX=/opt \
+ && sudo make install PREFIX=/opt \
+ && cd ..
+RUN cd yosys \
+ && make -j$(nproc) PREFIX=/opt\
+ && sudo make install PREFIX=/opt \
+ && cd ..
+
+# USB Hub Controller
+RUN git clone --branch v2.1.0 --single-branch https://github.com/mvp/uhubctl uhubctl
+RUN cd uhubctl \
+ && make prefix=/opt\
+ && sudo make install prefix=/opt \
+ && cd ..
+
+# Build Wheel Source
+RUN pip3 install wheel
+WORKDIR /usr/py-build
+COPY . ./
+RUN python setup.py bdist_wheel
+
+# Build the actual Run Container.
+FROM balenalib/%%BALENA_MACHINE_NAME%%-python:3.7.4-stretch-run AS run
+RUN install_packages build-essential libffi-dev libssl-dev bsdtar tcl-dev
+WORKDIR /usr/fpga
+ENV UDEV=1
+
+COPY --from=build /opt /opt
+COPY --from=build /usr/py-build/dist/*.whl /opt
+ENV PATH /opt/bin:/opt/sbin:$PATH
+RUN pip3 install /opt/*.whl
+RUN rm /opt/*.whl
+
+CMD icecored_debug
